@@ -54,14 +54,9 @@ def entropy_floor(n_batches=200, batch_size=256, seq_len=100, D=10, device="cpu"
         total += ent.mean().item()                        # mean over all B*L positions
     return total / n_batches
 
-from dataclasses import dataclass
-import dataclasses
 from pathlib import Path
-import torch
-from torch import optim
-from tqdm import tqdm
-import torch.nn.functional as F
-import matplotlib.pyplot as plt
+
+from llm_counting.model.model import Transformer
 
 
 @dataclass

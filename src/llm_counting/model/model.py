@@ -1,13 +1,11 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 from tqdm import tqdm
 from typing import List, Any, Dict
 import math
 from einops import rearrange
-
-
-from IPython.terminal.interactiveshell import Bool
 
 
 class RotaryEmbeddings(nn.Module):
@@ -99,7 +97,8 @@ class MLP(nn.Module):
     self.output = nn.Linear(hidden, in_dim)
   def forward(self, x:torch.Tensor):
     out = self.input(x)
-    out = self.output(x)
+    out = F.gelu(out)
+    out = self.output(out)
     return out
 
 class TransformerBlock(nn.Module):
@@ -119,7 +118,6 @@ class TransformerBlock(nn.Module):
     x = x + self.mlp(self.norm2(x))
     return x
 
-#TODO: add decoding strategy 
 class Transformer(nn.Module):
   def __init__(self, input_dim, out_dim, attn_dim, hidden_dim, num_heads=4, causal=True, max_len=512,num_blocks:int=2,VOCAB:int=11):
     super().__init__()
@@ -143,3 +141,35 @@ class Transformer(nn.Module):
     x = self.blocks(x)
     x = self.norm(x)
     return self.out(x)
+
+  @torch.no_grad()
+  def generate(self, batch_size, length, bos_id=None,
+               mode="greedy", temperature=1.0, device="cpu"):
+    """Autoregressive decoding from BOS.
+
+    Modes:
+      "greedy"  - argmax at each step.
+      "sample"  - multinomial(temperature) at each step.
+
+    Returns the generated digit sequence (B, length) with BOS dropped.
+    """
+    self.eval()
+    out_dim = self.out.out_features          # V = D + 1
+    bos_id = out_dim - 1 if bos_id is None else bos_id
+
+    seq = torch.full((batch_size, 1), bos_id, dtype=torch.long, device=device)
+    for _ in range(length):
+      logits = self(seq)[:, -1, :].clone()   # (B, V) next-token logits
+      logits[:, bos_id] = float("-inf")      # never emit BOS mid-sequence
+
+      if mode == "greedy":
+        nxt = logits.argmax(dim=-1)
+      elif mode == "sample":
+        probs = torch.softmax(logits / temperature, dim=-1)
+        nxt = torch.multinomial(probs, num_samples=1).squeeze(-1)
+      else:
+        raise ValueError(f"unknown decoding mode: {mode}")
+
+      seq = torch.cat([seq, nxt[:, None]], dim=1)
+
+    return seq[:, 1:]
